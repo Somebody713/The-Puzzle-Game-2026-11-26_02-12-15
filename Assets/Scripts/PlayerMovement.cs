@@ -2,111 +2,129 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[RequireComponent(typeof(Rigidbody))]
-[RequireComponent(typeof(Animator))]
+[DefaultExecutionOrder(-100)]
+[RequireComponent(typeof(Rigidbody), typeof(Animator))]
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Root Motion Speed Limits")]
-    [SerializeField] private float maxWalkSpeed = 4f;
-    [SerializeField] private float maxRunSpeed = 7f;
+    [Header("Input")]
+    [SerializeField] private InputActionReference move;
+    [SerializeField] private InputActionReference sprint;
+
+    [Header("Animation")]
+    [SerializeField] private float dampTime = 0.1f;
+    [SerializeField] private float speedMultiplier = 1.6f;
+
+    private static readonly int MoveX =
+        Animator.StringToHash("MoveX");
+
+    private static readonly int MoveY =
+        Animator.StringToHash("MoveY");
 
     private Rigidbody rb;
-    private Animator animator;
+    private Animator anim;
 
     private Vector2 moveInput;
-    private bool isRunning;
+    private bool running;
 
-    private Vector3 rootMotionVelocity;
+    public bool InputEnabled { get; set; } = true;
 
     public Vector2 MoveInput => moveInput;
-    public bool IsRunning => isRunning;
-    public Vector3 RootMotionVelocity => rootMotionVelocity;
+    public bool IsRunning => running;
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        animator = GetComponent<Animator>();
+        anim = GetComponent<Animator>();
 
-        animator.applyRootMotion = true;
+        anim.applyRootMotion = true;
+        anim.speed = speedMultiplier;
 
         rb.isKinematic = false;
         rb.useGravity = true;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        rb.collisionDetectionMode =
+            CollisionDetectionMode.ContinuousDynamic;
         rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+
+        if (capsule != null)
+        {
+            capsule.material = new PhysicsMaterial("NoFriction")
+            {
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum
+            };
+        }
+    }
+
+    private void OnEnable()
+    {
+        if (move != null && move.action != null)
+            move.action.actionMap?.Enable();
+
+        if (sprint != null && sprint.action != null)
+            sprint.action.actionMap?.Enable();
+    }
+
+    private void OnDisable()
+    {
+        if (move != null && move.action != null)
+            move.action.actionMap?.Disable();
     }
 
     private void Update()
     {
-        moveInput = Vector2.zero;
-        isRunning = false;
+        moveInput = InputEnabled && move != null
+            ? move.action.ReadValue<Vector2>()
+            : Vector2.zero;
 
-        if (Keyboard.current != null)
-        {
-            if (Keyboard.current.wKey.isPressed)
-                moveInput.y += 1;
-
-            if (Keyboard.current.sKey.isPressed)
-                moveInput.y -= 1;
-
-            if (Keyboard.current.aKey.isPressed)
-                moveInput.x -= 1;
-
-            if (Keyboard.current.dKey.isPressed)
-                moveInput.x += 1;
-
-            isRunning = Keyboard.current.leftShiftKey.isPressed;
-        }
+        running = InputEnabled &&
+                  sprint != null &&
+                  sprint.action.IsPressed();
 
         moveInput = Vector2.ClampMagnitude(moveInput, 1f);
 
-        float speed = moveInput == Vector2.zero
-            ? 0f
-            : isRunning ? 1f : 0.5f;
+        float x = moveInput.x * 0.5f;
+        float y = moveInput.y * 0.5f;
 
-        animator.SetFloat("Speed", speed);
-        animator.SetFloat("Direction", moveInput.x);
+        if (running && moveInput.y > 0f)
+        {
+            y = moveInput.y;
+        }
+
+        anim.SetFloat(MoveX, x, dampTime, Time.deltaTime);
+        anim.SetFloat(MoveY, y, dampTime, Time.deltaTime);
     }
 
     private void OnAnimatorMove()
     {
-        if (Time.deltaTime <= 0f || moveInput.sqrMagnitude < 0.001f)
-        {
-            rootMotionVelocity = Vector3.zero;
+        float dt = anim.updateMode == AnimatorUpdateMode.Fixed
+            ? Time.fixedDeltaTime
+            : Time.deltaTime;
+
+        if (dt <= 0f)
             return;
-        }
 
-        Vector3 localDelta =
-            transform.InverseTransformDirection(animator.deltaPosition);
+        Vector3 velocity = anim.deltaPosition / dt;
 
-        // Reverse forward root motion when pressing S.
-        if (Mathf.Abs(moveInput.y) > 0.1f)
-        {
-            localDelta.z =
-                Mathf.Abs(localDelta.z) * Mathf.Sign(moveInput.y);
-        }
-
-        Vector3 worldDelta =
-            transform.TransformDirection(localDelta);
-
-        worldDelta.y = 0f;
-
-        Vector3 velocity = worldDelta / Time.deltaTime;
-
-        float maxSpeed = isRunning ? maxRunSpeed : maxWalkSpeed;
-
-        // Prevent sudden root motion spikes.
-        rootMotionVelocity =
-            Vector3.ClampMagnitude(velocity, maxSpeed);
-    }
-
-    private void FixedUpdate()
-    {
-        Vector3 velocity = rb.linearVelocity;
-
-        velocity.x = rootMotionVelocity.x;
-        velocity.z = rootMotionVelocity.z;
+        // Gravity remains controlled by Rigidbody.
+        velocity.y = rb.linearVelocity.y;
 
         rb.linearVelocity = velocity;
+    }
+
+    public void ResetTo(Vector3 position)
+    {
+        rb.linearVelocity = Vector3.zero;
+        rb.position = position;
+        transform.position = position;
+
+        moveInput = Vector2.zero;
+        running = false;
+
+        anim.SetFloat(MoveX, 0f);
+        anim.SetFloat(MoveY, 0f);
     }
 }

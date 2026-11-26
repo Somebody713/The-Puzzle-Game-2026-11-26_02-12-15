@@ -1,58 +1,113 @@
 
 using UnityEngine;
 
-[RequireComponent(typeof(Rigidbody))]
-[RequireComponent(typeof(Animator))]
+[DefaultExecutionOrder(-90)]
+[RequireComponent(typeof(Rigidbody), typeof(Animator))]
 public class MirrorMovement : MonoBehaviour
 {
+    [Header("Mirror")]
     public PlayerMovement player;
 
+    [SerializeField] private bool mirrored = true;
+
+    [Header("Animation")]
+    [SerializeField] private float dampTime = 0.1f;
+    [SerializeField] private float speedMultiplier = 1.6f;
+
+    private static readonly int MoveX =
+        Animator.StringToHash("MoveX");
+
+    private static readonly int MoveY =
+        Animator.StringToHash("MoveY");
+
     private Rigidbody rb;
-    private Animator animator;
+    private Animator anim;
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        animator = GetComponent<Animator>();
+        anim = GetComponent<Animator>();
 
-        // Twin uses Player's Root Motion velocity.
-        animator.applyRootMotion = false;
+        anim.applyRootMotion = true;
+        anim.speed = speedMultiplier;
 
         rb.isKinematic = false;
         rb.useGravity = true;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        rb.collisionDetectionMode =
+            CollisionDetectionMode.ContinuousDynamic;
         rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+
+        if (capsule != null)
+        {
+            capsule.material = new PhysicsMaterial("NoFriction")
+            {
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum
+            };
+        }
     }
 
     private void Update()
     {
         if (player == null)
+        {
+            anim.SetFloat(MoveX, 0f);
+            anim.SetFloat(MoveY, 0f);
             return;
+        }
 
-        float speed = player.MoveInput == Vector2.zero
-            ? 0f
-            : player.IsRunning ? 1f : 0.5f;
+        Vector2 input = player.InputEnabled
+            ? player.MoveInput
+            : Vector2.zero;
 
-        animator.SetFloat("Speed", speed);
+        bool running = player.InputEnabled && player.IsRunning;
 
-        // Twin faces the opposite direction (180 degrees).
-        animator.SetFloat("Direction", -player.MoveInput.x);
+        float x = input.x * 0.5f;
+
+        if (mirrored)
+        {
+            x = -x;
+        }
+
+        float y = input.y * 0.5f;
+
+        if (running && input.y > 0f)
+        {
+            y = input.y;
+        }
+
+        anim.SetFloat(MoveX, x, dampTime, Time.deltaTime);
+        anim.SetFloat(MoveY, y, dampTime, Time.deltaTime);
     }
 
-    private void FixedUpdate()
+    private void OnAnimatorMove()
     {
-        if (player == null)
+        float dt = anim.updateMode == AnimatorUpdateMode.Fixed
+            ? Time.fixedDeltaTime
+            : Time.deltaTime;
+
+        if (dt <= 0f)
             return;
 
-        Vector3 playerVelocity = player.RootMotionVelocity;
+        Vector3 velocity = anim.deltaPosition / dt;
 
-        Vector3 velocity = rb.linearVelocity;
-
-        // Mirror only horizontal movement.
-        velocity.x = -playerVelocity.x;
-        velocity.z = playerVelocity.z;
+        // Keep gravity independent of Root Motion.
+        velocity.y = rb.linearVelocity.y;
 
         rb.linearVelocity = velocity;
+    }
+
+    public void ResetTo(Vector3 position)
+    {
+        rb.linearVelocity = Vector3.zero;
+        rb.position = position;
+        transform.position = position;
+
+        anim.SetFloat(MoveX, 0f);
+        anim.SetFloat(MoveY, 0f);
     }
 }

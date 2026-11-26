@@ -11,7 +11,7 @@ public class GameManager : MonoBehaviour
     public GameObject playerExit;
     public GameObject twinExit;
 
-    public int totalGems = 6;
+    public int totalGems = 7;
 
     private Vector3 playerStart;
     private Vector3 twinStart;
